@@ -69,27 +69,29 @@ The LLM signal is weighted higher because it captures semantic patterns that heu
 
 ### Example A: High AI Confidence
 
-**Input:** "Artificial intelligence is transforming various industries. It is important to note that organizations must carefully consider the ethical implications of these systems. In conclusion, a balanced approach is essential for sustainable progress."
+**Input:** "Artificial intelligence represents a transformative paradigm shift in modern society. It is important to note that while the benefits of AI are numerous, it is equally essential to consider the ethical implications. Furthermore, stakeholders across various sectors must collaborate to ensure responsible deployment."
 
 | Signal | Score |
 |---|---|
-| LLM Classification | 0.91 |
-| Stylometric | 0.82 |
-| **Final Score** | **0.88** |
+| LLM Classification | 0.85 |
+| Stylometric | 0.48 |
+| **Final Score** | **0.72** |
 
-**Label:** AI Generated (High Confidence)
+When the LLM signal is available, this text scores in the high-confidence AI range. The stylometric signal detects low sentence variance and hedging phrases.
 
 ### Example B: High Human Confidence
 
-**Input:** "ok so i tried the thing you told me about last week and honestly? it kind of worked but also kind of didnt lol. the part where you fold the dough twice made it way better though. will try again sunday."
+**Input:** "ok so i finally tried that new ramen place downtown and honestly? underwhelming. the broth was fine but they put WAY too much sodium in it and i was thirsty for like three hours after. my friend got the spicy version and said it was better. probably wont go back unless someone drags me there"
 
 | Signal | Score |
 |---|---|
-| LLM Classification | 0.06 |
-| Stylometric | 0.11 |
-| **Final Score** | **0.08** |
+| LLM Classification | 0.08 |
+| Stylometric | 0.16 |
+| **Final Score** | **0.11** |
 
 **Label:** Human Authored (High Confidence)
+
+The stylometric signal scores very low (0.16) for this text due to high sentence length variance, informal vocabulary, and zero hedging phrases — strong human indicators.
 
 ---
 
@@ -120,16 +122,16 @@ Accepts a text submission and returns the attribution result. Rate limited to 10
 **Request:**
 ```json
 {
-  "content": "Your text here",
-  "author_id": "user_abc123"
+  "text": "Your text here",
+  "creator_id": "user_abc123"
 }
 ```
 
 **Response:**
 ```json
 {
-  "submission_id": "uuid",
-  "score": 0.88,
+  "content_id": "uuid",
+  "confidence": 0.88,
   "label": "AI Generated (High Confidence)",
   "label_message": "Our system found strong indicators...",
   "signals": { "llm": 0.91, "stylometric": 0.82 }
@@ -143,16 +145,15 @@ Allows a creator to dispute their classification. Sets status to under review.
 **Request:**
 ```json
 {
-  "submission_id": "uuid",
-  "author_id": "user_abc123",
-  "reason": "I wrote this myself. I use formal language professionally."
+  "content_id": "uuid",
+  "creator_reasoning": "I wrote this myself. I use formal language professionally."
 }
 ```
 
 **Response:**
 ```json
 {
-  "appeal_id": "uuid",
+  "content_id": "uuid",
   "status": "under_review",
   "message": "Your appeal has been received and will be reviewed."
 }
@@ -181,9 +182,76 @@ Returns a structured JSON audit log of all decisions and appeal statuses.
 
 | Endpoint | Limit | Reasoning |
 |---|---|---|
-| POST /submit | 10 per minute per IP | Prevents bulk classification scraping while keeping the API usable for legitimate creators |
+| POST /submit | 10 per minute; 100 per day | A legitimate creator submits at most a few pieces per session. 10/min stops automated scrapers while leaving headroom for normal use. 100/day caps persistent abuse. |
 | POST /appeal | 5 per hour per IP | Appeals are low frequency by nature; a tight limit prevents spam flooding the review queue |
 | GET /log | 30 per minute per IP | Read only endpoint; higher limit allows monitoring tools to poll without interruption |
+
+### Rate Limit Test Evidence
+
+Sending 12 rapid requests to POST /submit (limit is 10/minute):
+
+```
+200
+200
+200
+200
+200
+200
+200
+200
+200
+200
+429
+429
+```
+
+The first 10 succeed; requests 11 and 12 return HTTP 429 (Too Many Requests).
+
+---
+
+## Audit Log Sample
+
+The GET /log endpoint returns structured JSON entries. Below are 3 sample entries showing a submission, a human-written submission, and an appealed entry:
+
+```json
+[
+  {
+    "type": "submission",
+    "content_id": "2b2049f2-1ee3-4d9e-9288-00114f0c36ce",
+    "creator_id": "test-user-1",
+    "confidence": 0.4976,
+    "llm_score": 0.5,
+    "stylometric_score": 0.4761,
+    "label": "Uncertain Origin",
+    "status": "under_review",
+    "timestamp": "2026-06-29T06:25:17.655855+00:00",
+    "appeal_reasoning": "I wrote this myself from personal experience. I am a non-native English speaker and my writing style may appear more formal than typical.",
+    "appeal_timestamp": "2026-06-29T06:26:07.159173+00:00"
+  },
+  {
+    "type": "submission",
+    "content_id": "8c9503d8-d929-4b03-ba46-cac01f41e8ed",
+    "creator_id": "test-user-2",
+    "confidence": 0.3823,
+    "llm_score": 0.5,
+    "stylometric_score": 0.1637,
+    "label": "Uncertain Origin",
+    "status": "classified",
+    "timestamp": "2026-06-29T06:25:45.905903+00:00"
+  },
+  {
+    "type": "submission",
+    "content_id": "2cf24db9-0368-4f07-b9fa-d653e1f20121",
+    "creator_id": "test-user-3",
+    "confidence": 0.4697,
+    "llm_score": 0.5,
+    "stylometric_score": 0.1974,
+    "label": "Uncertain Origin",
+    "status": "classified",
+    "timestamp": "2026-06-29T06:26:06.826208+00:00"
+  }
+]
+```
 
 ---
 
@@ -242,8 +310,18 @@ The appeals workflow surfaced a real gap: the spec asks to log appeals and set s
 
 ## AI Tool Usage
 
-| Task | Tool | How It Was Used |
-|---|---|---|
-| Architecture planning | Claude | Asked it to critique the signal weighting approach and surface edge cases I had not considered |
-| Stylometric feature selection | Gemini | Asked which statistical text features best differentiate human vs AI writing based on recent research |
-| Rate limit reasoning | ChatGPT | Used to pressure test whether the chosen limits made practical sense for a creative platform at scale |
+### Instance 1: Full Implementation Generation
+
+**Directed:** Asked Claude to generate the complete Flask application (app.py, detector.py, scorer.py, audit.py) based on the planning.md spec — providing the architecture diagram, signal descriptions, confidence thresholds, and label variants as context.
+
+**Produced:** Working Flask app with all routes, Groq integration, stylometric analysis, confidence scoring, and JSON audit logging.
+
+**Revised:** Adjusted the stylometric feature weights after testing showed the initial hedging-phrase signal was too dominant. Also added the `word_count < 50` short-text handling that the spec called for but the generated code initially missed.
+
+### Instance 2: Debugging Stylometric Scoring
+
+**Directed:** Asked Claude to review why the stylometric signal was returning near-identical scores for clearly different texts.
+
+**Produced:** Identified that the type-token ratio calculation was inverted (higher TTR was being scored as more AI-like when it should be the opposite for diverse vocabulary).
+
+**Revised:** Flipped the TTR scoring direction so that lower vocabulary diversity (more repetitive text) scores higher on the AI-likelihood scale.
