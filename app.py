@@ -16,6 +16,18 @@ limiter = Limiter(
 )
 
 
+@app.route("/")
+def index():
+    return jsonify({
+        "name": "Provenance Guard API",
+        "endpoints": {
+            "POST /submit": "Submit text for AI detection analysis",
+            "POST /appeal": "Appeal a classification decision",
+            "GET /log": "View audit log entries",
+        }
+    })
+
+
 @app.route("/submit", methods=["POST"])
 @limiter.limit("10 per minute;100 per day")
 def submit():
